@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>业余无线电位置汇聚与路由验证台</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <div class="logo">📡</div>
+    <div>
+      <h1>业余无线电汇聚服务器</h1>
+      <p>固定种子模拟 · 中继路径改写 / 网关听邻 / 第三方封装 / 物体代管 / 参照实现对账</p>
+    </div>
+  </div>
+  <div class="stats" id="stats"></div>
+  <div class="login">
+    <input id="callInput" placeholder="呼号，如 BG0001" value="BG0001" />
+    <input id="passInput" placeholder="呼号口令" />
+    <button id="deriveBtn" class="secondary">算口令</button>
+    <button id="loginBtn">登录</button>
+    <span id="loginStatus" class="login-status">未登录</span>
+  </div>
+</header>
+
+<main class="layout">
+  <section class="map-panel">
+    <div class="map-toolbar">
+      <div class="map-title">服务区地图 · 台站位置与报告轨迹</div>
+      <label><input type="checkbox" id="showPoints" checked /> 报告点</label>
+      <label><input type="checkbox" id="showCoverage" /> 覆盖圈</label>
+      <label><input type="checkbox" id="showObjects" checked /> 物体/地标</label>
+      <button id="clearRoute" class="secondary small">清除选中路径</button>
+    </div>
+    <div class="map-wrap">
+      <svg id="map" viewBox="0 0 1100 820" preserveAspectRatio="xMidYMid meet" role="img" aria-label="台站地图">
+        <defs>
+          <pattern id="grid" width="55" height="55" patternUnits="userSpaceOnUse">
+            <path d="M 55 0 L 0 0 0 55" fill="none" stroke="#d8e2ea" stroke-width="1"/>
+          </pattern>
+          <filter id="shadow" x="-30%" y="-30%" width="160%" height="160%">
+            <feDropShadow dx="0" dy="1.5" stdDeviation="2" flood-color="#1b3348" flood-opacity=".28"/>
+          </filter>
+        </defs>
+        <rect x="0" y="0" width="1100" height="820" fill="#eef4f8"/>
+        <rect x="0" y="0" width="1100" height="820" fill="url(#grid)"/>
+        <g id="terrain"></g>
+        <g id="coverage"></g>
+        <g id="tracks"></g>
+        <g id="reportPoints"></g>
+        <g id="objects"></g>
+        <g id="stationMarkers"></g>
+        <g id="routeLayer"></g>
+        <g id="mapLabels"></g>
+      </svg>
+      <div id="mapCard" class="map-card hidden"></div>
+      <div class="legend">
+        <div><i class="dot station"></i>移动/固定台站</div>
+        <div><i class="tri relay"></i>中继</div>
+        <div><i class="sq gateway"></i>接入网关</div>
+        <div><i class="star object"></i>代管物体</div>
+        <div class="legend-line"></div>
+        <div><i class="rp turn"></i>转弯补报</div>
+        <div><i class="rp interval"></i>周期/移动</div>
+        <div><i class="rp stationary"></i>静止心跳</div>
+      </div>
+    </div>
+  </section>
+
+  <aside class="sidebar">
+    <nav class="tabs">
+      <button class="tab active" data-tab="packets">报文路径</button>
+      <button class="tab" data-tab="objects">物体代管</button>
+      <button class="tab" data-tab="messages">短消息</button>
+      <button class="tab" data-tab="clients">客户端</button>
+      <button class="tab" data-tab="verify">验收对账</button>
+    </nav>
+
+    <section class="tab-panel active" data-panel="packets">
+      <div class="filters">
+        <input id="searchInput" placeholder="搜呼号 / MID / 物体 / 文本" />
+        <select id="kindFilter">
+          <option value="">全部类型</option>
+          <option value="position">位置</option>
+          <option value="weather">气象</option>
+          <option value="chat">短消息</option>
+          <option value="object">物体报告</option>
+          <option value="object-remove">物体撤销</option>
+          <option value="notice">通知/拒收</option>
+        </select>
+        <button id="refreshMessages" class="secondary small">刷新</button>
+      </div>
+      <div id="messageList" class="message-list"></div>
+      <div id="packetDetail" class="detail hidden"></div>
+    </section>
+
+    <section class="tab-panel" data-panel="objects">
+      <div class="panel-head">
+        <h2>按名字管理的物体 / 地标</h2>
+        <p>首次报告者为 owner；只有 owner 能撤销，其他人的撤销会产生 NAK。</p>
+      </div>
+      <div id="objectList" class="object-list"></div>
+    </section>
+
+    <section class="tab-panel" data-panel="messages">
+      <div class="composer">
+        <h2>发送短消息</h2>
+        <label>对方呼号 <input id="toInput" list="heardList" value="BG0002" /></label>
+        <datalist id="heardList"></datalist>
+        <label>内容 <input id="textInput" value="HELLO VIA MOUNTAIN GATEWAY" /></label>
+        <button id="sendBtn">用当前登录呼号发送</button>
+        <p class="hint">服务器只会选择最近 45 分钟内在某网关附近被直接听到的收件人，交给最新听到它的网关转成无线电第三方报文。</p>
+        <div id="sendResult"></div>
+      </div>
+      <div id="chatList" class="message-list"></div>
+    </section>
+
+    <section class="tab-panel" data-panel="clients">
+      <div class="panel-head"><h2>在线客户端与收报集合</h2><p>口令由呼号哈希算出；口令错误可收报，但发送/撤销会被拒。</p></div>
+      <div id="clientList" class="client-list"></div>
+      <pre id="clientDetail" class="client-detail hidden"></pre>
+    </section>
+
+    <section class="tab-panel" data-panel="verify">
+      <div id="verifyBox" class="verify-box">参照实现对账启动中…</div>
+      <div class="panel-head">
+        <h2>验收口径</h2>
+        <ul class="accept-list">
+          <li>固定种子生成 300 台站、24 中继、12 网关、30 客户端。</li>
+          <li>每链路按稳定键随机丢包、重复和 1–90 秒延迟。</li>
+          <li>随机插入 42 条格式/字段错误报文。</li>
+          <li>Go 测试中的独立参照引擎逐条重放路径、q 标记、听邻、物体和订阅规则。</li>
+        </ul>
+      </div>
+    </section>
+  </aside>
+</main>
+<script src="/app.js"></script>
+</body>
+</html>
